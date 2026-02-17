@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cookie Climb 🍪</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Fredoka+One&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a0a00;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Press Start 2P', monospace;
+    overflow: hidden;
+  }
+
+  #ui {
+    display: flex;
+    gap: 30px;
+    padding: 10px 20px;
+    background: rgba(0,0,0,0.6);
+    border: 3px solid #f4a020;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    color: #ffe066;
+    font-size: 10px;
+    align-items: center;
+    width: 700px;
+    justify-content: space-between;
+  }
+
+  #gameCanvas {
+    border: 4px solid #f4a020;
+    border-radius: 4px;
+    display: block;
+    image-rendering: pixelated;
+  }
+
+  #controls-hint {
+    margin-top: 8px;
+    color: #888;
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+
+  #overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.92);
+    border: 4px solid #f4a020;
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    color: #ffe066;
+    z-index: 10;
+    min-width: 380px;
+  }
+
+  #overlay h1 {
+    font-family: 'Fredoka One', cursive;
+    font-size: 52px;
+    color: #f4a020;
+    text-shadow: 3px 3px 0 #8B4513, 6px 6px 0 rgba(0,0,0,0.5);
+    margin-bottom: 10px;
+  }
+
+  #overlay p {
+    font-size: 9px;
+    line-height: 2;
+    color: #ddd;
+    margin: 15px 0;
+  }
+
+  #overlay button {
+    margin-top: 20px;
+    padding: 14px 32px;
+    background: #f4a020;
+    color: #1a0a00;
+    border: none;
+    border-radius: 6px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.1s;
+    box-shadow: 0 4px 0 #8B4513;
+  }
+
+  #overlay button:hover {
+    background: #ffe066;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 #8B4513;
+  }
+
+  #overlay button:active {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #8B4513;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <span>🍪 COOKIE CLIMB</span>
+  <span id="levelDisplay">LEVEL 1</span>
+  <span id="livesDisplay">❤️❤️❤️</span>
+  <span id="scoreDisplay">SCORE: 0</span>
+</div>
+<canvas id="gameCanvas" width="700" height="520"></canvas>
+<div id="controls-hint">WASD / ARROW KEYS — MOVE &nbsp;|&nbsp; SPACE — JUMP</div>
+
+<div id="overlay">
+  <h1>🍪 Cookie Climb</h1>
+  <p>
+    You're a tiny mouse! Climb ladders & yarn<br>
+    to reach the cookie jar on the counter!<br><br>
+    ⚠️ Watch out for cat paws, falling objects<br>
+    and giant human stomps!<br><br>
+    WASD / ARROWS to move &nbsp; SPACE to jump
+  </p>
+  <button onclick="startGame()">START CLIMBING!</button>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const W = canvas.width;
+const H = canvas.height;
+
+let gameState = 'menu';
+let level = 1;
+let lives = 3;
+let score = 0;
+let frameCount = 0;
+let animFrame;
+
+// Input
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// ─── PLAYER ────────────────────────────────────────────────────────────────
+const player = {
+  x: 80, y: 460, w: 22, h: 28,
+  vx: 0, vy: 0,
+  onGround: false,
+  onLadder: false,
+  facingRight: true,
+  invincible: 0,
+  walkFrame: 0,
+  walkTimer: 0,
+};
+
+// ─── LEVEL DATA ─────────────────────────────────────────────────────────────
+function buildLevel(lvl) {
+  const platforms = [], ladders = [], yarns = [], goal = {};
+  const obstacles = [];
+
+  // FLOOR
+  platforms.push({ x: 0, y: 490, w: 700, h: 30, type: 'floor' });
+
+  if (lvl === 1) {
+    // Shelf 1
+    platforms.push({ x: 0,   y: 380, w: 300, h: 14, type: 'shelf' });
+    platforms.push({ x: 400, y: 380, w: 300, h: 14, type: 'shelf' });
+    // Shelf 2
+    platforms.push({ x: 100, y: 270, w: 260, h: 14, type: 'shelf' });
+    platforms.push({ x: 450, y: 270, w: 250, h: 14, type: 'shelf' });
+    // Counter top
+    platforms.push({ x: 0,   y: 160, w: 700, h: 14, type: 'counter' });
+
+    ladders.push({ x: 295, y: 270, h: 110, type: 'ladder' });
+    ladders.push({ x: 90,  y: 380, h: 110, type: 'ladder' });
+    ladders.push({ x: 580, y: 270, h: 110, type: 'ladder' });
+
+    yarns.push({ x: 400, y: 174, topY: 174, botY: 380, type: 'yarn' });
+
+    goal.x = 520; goal.y = 100; goal.w = 60; goal.h = 60;
+
+    obstacles.push({ type: 'catpaw', x: 700, y: 355, w: 60, h: 40, speed: -2.2, range: [0, 700], dir: -1, timer: 0, interval: 200 });
+    obstacles.push({ type: 'faller', x: 150, y: -40, w: 20, h: 20, vy: 2.5, resetY: -40, startX: 150 });
+
+  } else if (lvl === 2) {
+    platforms.push({ x: 0,   y: 390, w: 200, h: 14, type: 'shelf' });
+    platforms.push({ x: 280, y: 390, w: 180, h: 14, type: 'shelf' });
+    platforms.push({ x: 530, y: 390, w: 170, h: 14, type: 'shelf' });
+    platforms.push({ x: 60,  y: 280, w: 220, h: 14, type: 'shelf' });
+    platforms.push({ x: 380, y: 280, w: 220, h: 14, type: 'shelf' });
+    platforms.push({ x: 150, y: 175, w: 400, h: 14, type: 'counter' });
+
+    ladders.push({ x: 165, y: 280, h: 110, type: 'ladder' });
+    ladders.push({ x: 520, y: 280, h: 110, type: 'ladder' });
+    ladders.push({ x: 270, y: 390, h: 110, type: 'ladder' });
+    yarns.push({ x: 350, y: 189, topY: 189, botY: 390, type: 'yarn' });
+
+    goal.x = 290; goal.y = 110; goal.w = 60; goal.h = 60;
+
+    obstacles.push({ type: 'catpaw', x: 0, y: 355, w: 60, h: 40, speed: 2.5, range: [0, 700], dir: 1, timer: 0, interval: 180 });
+    obstacles.push({ type: 'catpaw', x: 700, y: 245, w: 60, h: 40, speed: -2.0, range: [0, 700], dir: -1, timer: 0, interval: 160 });
+    obstacles.push({ type: 'faller', x: 350, y: -40, w: 22, h: 22, vy: 3.0, resetY: -40, startX: 350 });
+    obstacles.push({ type: 'human', timer: 0, interval: 400, active: false, shake: 0 });
+
+  } else {
+    // Level 3+: harder
+    platforms.push({ x: 0,   y: 400, w: 160, h: 14, type: 'shelf' });
+    platforms.push({ x: 220, y: 400, w: 130, h: 14, type: 'shelf' });
+    platforms.push({ x: 410, y: 400, w: 130, h: 14, type: 'shelf' });
+    platforms.push({ x: 590, y: 400, w: 110, h: 14, type: 'shelf' });
+    platforms.push({ x: 30,  y: 295, w: 180, h: 14, type: 'shelf' });
+    platforms.push({ x: 280, y: 295, w: 160, h: 14, type: 'shelf' });
+    platforms.push({ x: 500, y: 295, w: 160, h: 14, type: 'shelf' });
+    platforms.push({ x: 100, y: 190, w: 500, h: 14, type: 'counter' });
+
+    ladders.push({ x: 150, y: 295, h: 105, type: 'ladder' });
+    ladders.push({ x: 430, y: 295, h: 105, type: 'ladder' });
+    ladders.push({ x: 212, y: 400, h: 105, type: 'ladder' });
+    ladders.push({ x: 580, y: 400, h: 105, type: 'ladder' });
+    yarns.push({ x: 350, y: 204, topY: 204, botY: 400, type: 'yarn' });
+
+    goal.x = 300; goal.y = 120; goal.w = 60; goal.h = 60;
+
+    obstacles.push({ type: 'catpaw', x: 0, y: 365, w: 60, h: 40, speed: 3.0, range: [0, 700], dir: 1, timer: 0, interval: 150 });
+    obstacles.push({ type: 'catpaw', x: 700, y: 260, w: 60, h: 40, speed: -3.0, range: [0, 700], dir: -1, timer: 0, interval: 140 });
+    obstacles.push({ type: 'faller', x: 200, y: -40, w: 24, h: 24, vy: 3.5, resetY: -40, startX: 200 });
+    obstacles.push({ type: 'faller', x: 500, y: -120, w: 20, h: 20, vy: 3.0, resetY: -120, startX: 500 });
+    obstacles.push({ type: 'human', timer: 0, interval: 300, active: false, shake: 0 });
+  }
+
+  return { platforms, ladders, yarns, goal, obstacles };
+}
+
+let currentLevel = null;
+let shakeX = 0, shakeY = 0;
+
+function startGame() {
+  document.getElementById('overlay').style.display = 'none';
+  lives = 3; score = 0; level = 1;
+  loadLevel(level);
+  gameState = 'playing';
+  if (animFrame) cancelAnimationFrame(animFrame);
+  loop();
+}
+
+function loadLevel(lvl) {
+  currentLevel = buildLevel(lvl);
+  player.x = 50; player.y = 455;
+  player.vx = 0; player.vy = 0;
+  player.onGround = false; player.onLadder = false;
+  player.invincible = 0;
+  frameCount = 0;
+  shakeX = 0; shakeY = 0;
+}
+
+function hitObstacle() {
+  if (player.invincible > 0) return;
+  lives--;
+  player.invincible = 120;
+  updateUI();
+  if (lives <= 0) {
+    gameOver();
+  } else {
+    // Reset to floor
+    player.x = 50; player.y = 455;
+    player.vx = 0; player.vy = 0;
+  }
+}
+
+function gameOver() {
+  gameState = 'gameover';
+  const ov = document.getElementById('overlay');
+  ov.innerHTML = `
+    <h1>💀 Game Over</h1>
+    <p>You ran out of lives!<br>Score: ${score}</p>
+    <button onclick="startGame()">TRY AGAIN</button>
+  `;
+  ov.style.display = 'block';
+}
+
+function levelComplete() {
+  score += 1000 + level * 500;
+  level++;
+  updateUI();
+  if (level > 5) {
+    gameState = 'win';
+    const ov = document.getElementById('overlay');
+    ov.innerHTML = `
+      <h1>🍪 You Win!</h1>
+      <p>You got ALL the cookies!<br>Final Score: ${score}</p>
+      <button onclick="startGame()">PLAY AGAIN</button>
+    `;
+    ov.style.display = 'block';
+    return;
+  }
+  const ov = document.getElementById('overlay');
+  ov.innerHTML = `
+    <h1 style="font-size:36px">Level ${level-1} Clear!</h1>
+    <p>🍪 Cookie acquired!<br>Score: ${score}<br><br>Level ${level} incoming...</p>
+    <button onclick="continueGame()">NEXT LEVEL</button>
+  `;
+  ov.style.display = 'block';
+  gameState = 'paused';
+}
+
+function continueGame() {
+  document.getElementById('overlay').style.display = 'none';
+  loadLevel(level);
+  gameState = 'playing';
+}
+
+function updateUI() {
+  document.getElementById('levelDisplay').textContent = `LEVEL ${level}`;
+  document.getElementById('livesDisplay').textContent = '❤️'.repeat(Math.max(0, lives));
+  document.getElementById('scoreDisplay').textContent = `SCORE: ${score}`;
+}
+
+// ─── PHYSICS & UPDATE ────────────────────────────────────────────────────────
+const GRAVITY = 0.5;
+const SPEED = 2.8;
+const JUMP = -11;
+const CLIMB_SPEED = 2.5;
+const LADDER_W = 20;
+
+function isOnClimbable(px, py, pw, ph) {
+  const { ladders, yarns } = currentLevel;
+  const cx = px + pw / 2;
+  for (const l of ladders) {
+    if (cx >= l.x && cx <= l.x + LADDER_W && py + ph > l.y && py < l.y + l.h) return true;
+  }
+  for (const yn of yarns) {
+    if (cx >= yn.x - 6 && cx <= yn.x + 6 && py + ph > yn.topY && py < yn.botY) return true;
+  }
+  return false;
+}
+
+function update() {
+  frameCount++;
+  if (gameState !== 'playing') return;
+
+  const { platforms, ladders, yarns, goal, obstacles } = currentLevel;
+
+  // ── Obstacle updates ──
+  shakeX *= 0.85;
+  shakeY *= 0.85;
+
+  for (const obs of obstacles) {
+    if (obs.type === 'catpaw') {
+      obs.x += obs.speed * obs.dir;
+      if (obs.x > obs.range[1] + 80) obs.dir = -1;
+      if (obs.x < obs.range[0] - 80) obs.dir = 1;
+
+      // Check collision with player
+      if (player.invincible === 0 &&
+          player.x < obs.x + obs.w && player.x + player.w > obs.x &&
+          player.y < obs.y + obs.h && player.y + player.h > obs.y) {
+        hitObstacle();
+      }
+    }
+
+    if (obs.type === 'faller') {
+      obs.y += obs.vy;
+      // Bounce off platforms
+      let landed = false;
+      for (const p of platforms) {
+        if (obs.y + obs.h >= p.y && obs.y + obs.h <= p.y + 20 &&
+            obs.x + obs.w > p.x && obs.x < p.x + p.w) {
+          obs.y = p.y - obs.h;
+          obs.vy *= -0.6;
+          landed = true;
+        }
+      }
+      if (obs.y > H + 50) { obs.y = obs.resetY; obs.x = obs.startX; obs.vy = Math.abs(obs.vy); }
+
+      if (player.invincible === 0 &&
+          player.x < obs.x + obs.w && player.x + player.w > obs.x &&
+          player.y < obs.y + obs.h && player.y + player.h > obs.y) {
+        hitObstacle();
+      }
+    }
+
+    if (obs.type === 'human') {
+      obs.timer++;
+      if (obs.timer >= obs.interval) {
+        obs.timer = 0;
+        obs.active = true;
+        obs.shake = 25;
+        // Knock player off if not on floor
+        if (player.y < 450) {
+          shakeX = 10;
+          shakeY = 8;
+          player.vx += (Math.random() - 0.5) * 8;
+          player.vy -= 3;
+          hitObstacle();
+        }
+      }
+      if (obs.shake > 0) obs.shake--;
+      else obs.active = false;
+    }
+  }
+
+  // ── Player movement ──
+  const left  = keys['KeyA'] || keys['ArrowLeft'];
+  const right = keys['KeyD'] || keys['ArrowRight'];
+  const up    = keys['KeyW'] || keys['ArrowUp'];
+  const down  = keys['KeyS'] || keys['ArrowDown'];
+  const jump  = keys['Space'];
+
+  const onClimbable = isOnClimbable(player.x, player.y, player.w, player.h);
+
+  if (onClimbable && (up || down)) {
+    player.onLadder = true;
+  }
+  if (!onClimbable) player.onLadder = false;
+
+  if (player.onLadder) {
+    player.vy = 0;
+    player.vx = 0;
+    if (up)   player.vy = -CLIMB_SPEED;
+    if (down) player.vy =  CLIMB_SPEED;
+    if (left) { player.vx = -SPEED; player.facingRight = false; }
+    if (right){ player.vx =  SPEED; player.facingRight = true; }
+    if (jump) { player.vy = JUMP; player.onLadder = false; }
+  } else {
+    if (left) { player.vx = -SPEED; player.facingRight = false; }
+    else if (right){ player.vx = SPEED; player.facingRight = true; }
+    else player.vx *= 0.7;
+
+    player.vy += GRAVITY;
+
+    if (jump && player.onGround) {
+      player.vy = JUMP;
+      player.onGround = false;
+    }
+  }
+
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // Wall clamp
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.w > W) player.x = W - player.w;
+
+  // Platform collision
+  player.onGround = false;
+  for (const p of platforms) {
+    if (player.x + player.w > p.x && player.x < p.x + p.w) {
+      // Landing on top
+      if (player.vy >= 0 && player.y + player.h >= p.y && player.y + player.h <= p.y + 20) {
+        player.y = p.y - player.h;
+        player.vy = 0;
+        player.onGround = true;
+        if (player.onLadder && !isOnClimbable(player.x, player.y, player.w, player.h)) {
+          player.onLadder = false;
+        }
+      }
+    }
+  }
+
+  // Fell off bottom
+  if (player.y > H + 50) {
+    hitObstacle();
+    player.x = 50; player.y = 455;
+    player.vx = 0; player.vy = 0;
+  }
+
+  // Walk animation
+  if (Math.abs(player.vx) > 0.3 || player.onLadder) {
+    player.walkTimer++;
+    if (player.walkTimer > 8) { player.walkFrame = (player.walkFrame + 1) % 4; player.walkTimer = 0; }
+  } else {
+    player.walkFrame = 0;
+  }
+
+  if (player.invincible > 0) player.invincible--;
+
+  // Goal check
+  if (player.x + player.w > goal.x && player.x < goal.x + goal.w &&
+      player.y + player.h > goal.y && player.y < goal.y + goal.h) {
+    levelComplete();
+  }
+
+  // Score
+  if (frameCount % 30 === 0 && gameState === 'playing') {
+    score++;
+    updateUI();
+  }
+}
+
+// ─── DRAWING ─────────────────────────────────────────────────────────────────
+function drawKitchenBG() {
+  // Wall
+  const wallGrad = ctx.createLinearGradient(0, 0, 0, H);
+  wallGrad.addColorStop(0, '#f5e6d0');
+  wallGrad.addColorStop(1, '#e8d0b0');
+  ctx.fillStyle = wallGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Tile pattern on wall
+  ctx.strokeStyle = 'rgba(200,170,130,0.4)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 490); ctx.stroke();
+  }
+  for (let y = 0; y <= 490; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Floor
+  const floorGrad = ctx.createLinearGradient(0, 490, 0, H);
+  floorGrad.addColorStop(0, '#8B5E3C');
+  floorGrad.addColorStop(1, '#6B3E1E');
+  ctx.fillStyle = floorGrad;
+  ctx.fillRect(0, 490, W, 30);
+
+  // Floor tiles
+  ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 60) {
+    ctx.beginPath(); ctx.moveTo(x, 490); ctx.lineTo(x, H); ctx.stroke();
+  }
+
+  // Background decorations - window
+  ctx.fillStyle = '#a8d8f0';
+  ctx.fillRect(30, 30, 120, 90);
+  ctx.strokeStyle = '#6B3E1E';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(30, 30, 120, 90);
+  ctx.beginPath(); ctx.moveTo(90, 30); ctx.lineTo(90, 120); ctx.lineWidth = 3; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(30, 75); ctx.lineTo(150, 75); ctx.stroke();
+  // Sky in window
+  ctx.fillStyle = '#87CEEB';
+  ctx.fillRect(34, 34, 112, 82);
+  // Clouds
+  ctx.fillStyle = 'white';
+  ctx.beginPath(); ctx.arc(70, 55, 12, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(85, 50, 15, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(100, 55, 12, 0, Math.PI*2); ctx.fill();
+}
+
+function drawPlatforms() {
+  const { platforms } = currentLevel;
+  for (const p of platforms) {
+    if (p.type === 'floor') continue; // already drawn
+
+    if (p.type === 'counter') {
+      // Counter top
+      ctx.fillStyle = '#d4956a';
+      ctx.fillRect(p.x, p.y, p.w, p.h + 10);
+      ctx.fillStyle = '#c47a50';
+      ctx.fillRect(p.x, p.y, p.w, 6);
+      // Counter edge
+      ctx.fillStyle = '#a05030';
+      ctx.fillRect(p.x, p.y + p.h + 4, p.w, 8);
+      // Counter side shadow
+      const cg = ctx.createLinearGradient(p.x, p.y, p.x, p.y + 30);
+      cg.addColorStop(0, 'rgba(0,0,0,0.15)');
+      cg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = cg;
+      ctx.fillRect(p.x, p.y + p.h + 12, p.w, 20);
+    } else {
+      // Wood shelf
+      ctx.fillStyle = '#c0874e';
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      // Wood grain
+      ctx.fillStyle = '#b07843';
+      for (let gx = p.x + 15; gx < p.x + p.w - 10; gx += 30) {
+        ctx.fillRect(gx, p.y + 2, 3, p.h - 4);
+      }
+      // Top highlight
+      ctx.fillStyle = '#d09060';
+      ctx.fillRect(p.x, p.y, p.w, 3);
+      // Bottom shadow
+      ctx.fillStyle = '#704020';
+      ctx.fillRect(p.x, p.y + p.h - 2, p.w, 4);
+      // Shelf bracket
+      if (p.x > 0) {
+        ctx.fillStyle = '#666';
+        ctx.fillRect(p.x + 10, p.y, 6, 20);
+      }
+    }
+  }
+}
+
+function drawClimbables() {
+  const { ladders, yarns } = currentLevel;
+  for (const l of ladders) {
+    // Ladder rails
+    ctx.strokeStyle = '#8B5E3C';
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(l.x + 2, l.y); ctx.lineTo(l.x + 2, l.y + l.h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(l.x + LADDER_W - 2, l.y); ctx.lineTo(l.x + LADDER_W - 2, l.y + l.h); ctx.stroke();
+    // Rungs
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#6B4020';
+    for (let ry = l.y + 10; ry < l.y + l.h; ry += 16) {
+      ctx.beginPath(); ctx.moveTo(l.x + 2, ry); ctx.lineTo(l.x + LADDER_W - 2, ry); ctx.stroke();
+    }
+  }
+  for (const yn of yarns) {
+    // Draw yarn as wobbly line
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#e84393';
+    ctx.beginPath();
+    ctx.moveTo(yn.x, yn.topY);
+    const wobble = Math.sin(frameCount * 0.04) * 4;
+    ctx.bezierCurveTo(yn.x + wobble * 2, yn.topY + (yn.botY - yn.topY) * 0.3,
+                      yn.x - wobble * 2, yn.topY + (yn.botY - yn.topY) * 0.7,
+                      yn.x, yn.botY);
+    ctx.stroke();
+    // Yarn ball at bottom
+    ctx.fillStyle = '#e84393';
+    ctx.beginPath(); ctx.arc(yn.x, yn.botY, 10, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#c0306a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(yn.x, yn.botY, 10, 0, Math.PI*2); ctx.stroke();
+  }
+}
+
+function drawGoal() {
+  const g = currentLevel.goal;
+  const bounce = Math.sin(frameCount * 0.07) * 4;
+
+  // Cookie jar body
+  ctx.fillStyle = '#c8a87a';
+  ctx.beginPath();
+  ctx.ellipse(g.x + g.w/2, g.y + g.h/2 + bounce, g.w/2 - 4, g.h/2 - 4, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = '#8B6040';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Jar lid
+  ctx.fillStyle = '#e04040';
+  ctx.beginPath();
+  ctx.ellipse(g.x + g.w/2, g.y + 8 + bounce, g.w/2 - 2, 10, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = '#902020'; ctx.lineWidth = 2; ctx.stroke();
+
+  // Knob
+  ctx.fillStyle = '#e04040';
+  ctx.beginPath();
+  ctx.arc(g.x + g.w/2, g.y - 2 + bounce, 6, 0, Math.PI*2);
+  ctx.fill();
+
+  // Cookie visible through glass
+  ctx.fillStyle = '#d4956a';
+  ctx.beginPath(); ctx.arc(g.x + g.w/2, g.y + g.h/2 + 4 + bounce, 14, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#5c2f00';
+  for (let i = 0; i < 5; i++) {
+    const cx = g.x + g.w/2 + Math.cos(i * 1.26) * 7;
+    const cy = g.y + g.h/2 + 4 + Math.sin(i * 1.26) * 7 + bounce;
+    ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Glow
+  const glow = ctx.createRadialGradient(g.x+g.w/2, g.y+g.h/2+bounce, 5, g.x+g.w/2, g.y+g.h/2+bounce, 45);
+  glow.addColorStop(0, 'rgba(255,220,50,0.3)');
+  glow.addColorStop(1, 'rgba(255,220,50,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(g.x+g.w/2, g.y+g.h/2+bounce, 45, 0, Math.PI*2); ctx.fill();
+
+  // Label
+  ctx.fillStyle = '#ffe066';
+  ctx.font = '9px Press Start 2P';
+  ctx.textAlign = 'center';
+  ctx.fillText('GOAL!', g.x + g.w/2, g.y - 12 + bounce);
+  ctx.textAlign = 'left';
+}
+
+function drawObstacles() {
+  const { obstacles } = currentLevel;
+  for (const obs of obstacles) {
+    if (obs.type === 'catpaw') {
+      const swipe = Math.sin(frameCount * 0.12) * 8;
+      ctx.save();
+      // Paw
+      ctx.fillStyle = '#ffaa88';
+      ctx.beginPath();
+      ctx.roundRect(obs.x, obs.y + swipe, obs.w, obs.h, 12);
+      ctx.fill();
+      ctx.strokeStyle = '#d08060'; ctx.lineWidth = 2; ctx.stroke();
+      // Claws
+      ctx.fillStyle = '#ffe0cc';
+      const toePositions = [8, 22, 36, 50];
+      for (const tx of toePositions) {
+        if (tx < obs.w - 4) {
+          ctx.beginPath();
+          ctx.ellipse(obs.x + tx, obs.y + 6 + swipe, 6, 5, 0, 0, Math.PI*2);
+          ctx.fill();
+          // Claw tip
+          ctx.fillStyle = '#fff';
+          ctx.beginPath();
+          ctx.moveTo(obs.x + tx - 3, obs.y + 2 + swipe);
+          ctx.lineTo(obs.x + tx + 3, obs.y + 2 + swipe);
+          ctx.lineTo(obs.x + tx, obs.y - 6 + swipe);
+          ctx.fill();
+          ctx.fillStyle = '#ffe0cc';
+        }
+      }
+      // Fur line at top
+      ctx.fillStyle = '#e89870';
+      for (let fx = obs.x; fx < obs.x + obs.w; fx += 8) {
+        ctx.beginPath();
+        ctx.moveTo(fx, obs.y + swipe);
+        ctx.lineTo(fx + 4, obs.y - 8 + swipe);
+        ctx.lineTo(fx + 8, obs.y + swipe);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    if (obs.type === 'faller') {
+      // Rolling pin / can
+      ctx.save();
+      ctx.fillStyle = '#c0c0c0';
+      ctx.strokeStyle = '#888'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(obs.x, obs.y, obs.w, obs.h, 5);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#aaa';
+      ctx.beginPath();
+      ctx.arc(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2 - 4, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#e44';
+      ctx.font = '7px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('!', obs.x + obs.w/2, obs.y + obs.h/2 + 3);
+      ctx.restore();
+    }
+
+    if (obs.type === 'human' && obs.active) {
+      // Giant foot/leg stomping
+      ctx.save();
+      ctx.globalAlpha = 0.7;
+      const fy = 120 - obs.shake * 3;
+      ctx.fillStyle = '#f5deb3';
+      ctx.fillRect(280, fy, 140, 200);
+      // Shoe
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.roundRect(260, fy + 180, 180, 40, 8);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(260, fy + 182, 8, 36);
+      ctx.restore();
+    }
+  }
+}
+
+function drawPlayer() {
+  const px = player.x;
+  const py = player.y;
+  const blink = player.invincible > 0 && Math.floor(player.invincible / 8) % 2 === 0;
+  if (blink) return;
+
+  ctx.save();
+  if (!player.facingRight) {
+    ctx.translate(px + player.w, py);
+    ctx.scale(-1, 1);
+    ctx.translate(-px, -py);
+  }
+
+  // Body (mouse)
+  const bob = Math.sin(player.walkFrame * 1.5) * 2;
+
+  // Tail
+  ctx.strokeStyle = '#f0c0b0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(px + player.w, py + player.h - 6);
+  ctx.bezierCurveTo(px + player.w + 14, py + player.h, px + player.w + 18, py + player.h - 14, px + player.w + 12, py + player.h - 20);
+  ctx.stroke();
+
+  // Body
+  ctx.fillStyle = '#c8a0c0';
+  ctx.beginPath();
+  ctx.ellipse(px + player.w/2, py + player.h/2 + 3 + bob, 10, 13, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Head
+  ctx.fillStyle = '#d0b0c8';
+  ctx.beginPath();
+  ctx.ellipse(px + 14, py + 8 + bob, 9, 8, -0.2, 0, Math.PI*2);
+  ctx.fill();
+
+  // Ears
+  ctx.fillStyle = '#e0c0d8';
+  ctx.beginPath(); ctx.ellipse(px + 7, py + 2 + bob, 5, 6, -0.3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(px + 18, py + 1 + bob, 4, 5, 0.2, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#f0a0b0';
+  ctx.beginPath(); ctx.ellipse(px + 7, py + 2 + bob, 3, 4, -0.3, 0, Math.PI*2); ctx.fill();
+
+  // Eye
+  ctx.fillStyle = '#222';
+  ctx.beginPath(); ctx.arc(px + 17, py + 7 + bob, 2, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(px + 18, py + 6 + bob, 0.8, 0, Math.PI*2); ctx.fill();
+
+  // Nose
+  ctx.fillStyle = '#f06080';
+  ctx.beginPath(); ctx.ellipse(px + 21, py + 9 + bob, 2, 1.5, 0, 0, Math.PI*2); ctx.fill();
+
+  // Legs
+  ctx.strokeStyle = '#b890b0'; ctx.lineWidth = 3;
+  if (player.onLadder) {
+    const lf = Math.sin(frameCount * 0.25) * 6;
+    ctx.beginPath(); ctx.moveTo(px + 8, py + 18 + bob); ctx.lineTo(px + 5, py + player.h + lf); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px + 14, py + 18 + bob); ctx.lineTo(px + 17, py + player.h - lf); ctx.stroke();
+  } else {
+    const lf = Math.sin(player.walkFrame * 1.5) * 5;
+    ctx.beginPath(); ctx.moveTo(px + 7, py + 19 + bob); ctx.lineTo(px + 4, py + player.h + lf); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px + 13, py + 19 + bob); ctx.lineTo(px + 16, py + player.h - lf); ctx.stroke();
+  }
+
+  // Arms
+  ctx.beginPath(); ctx.moveTo(px + 8, py + 13 + bob); ctx.lineTo(px + 2, py + 18 + bob); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(px + 16, py + 13 + bob); ctx.lineTo(px + 22, py + 18 + bob); ctx.stroke();
+
+  // Backpack (cute detail)
+  ctx.fillStyle = '#6040a0';
+  ctx.fillRect(px + 3, py + 10 + bob, 6, 9);
+  ctx.fillStyle = '#8060c0';
+  ctx.fillRect(px + 3, py + 11 + bob, 6, 3);
+
+  ctx.restore();
+}
+
+function drawHUD() {
+  // Level indicator
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(W - 130, 8, 122, 22);
+  ctx.fillStyle = '#ffe066';
+  ctx.font = '10px Press Start 2P';
+  ctx.textAlign = 'right';
+  ctx.fillText(`LVL ${level}`, W - 12, 24);
+  ctx.textAlign = 'left';
+
+  // Arrow pointing to goal
+  const g = currentLevel.goal;
+  const gCx = g.x + g.w/2;
+  const gCy = g.y + g.h/2;
+  const dx = gCx - (player.x + player.w/2);
+  const dy = gCy - (player.y + player.h/2);
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  if (dist > 80) {
+    const ang = Math.atan2(dy, dx);
+    const ax = player.x + player.w/2 + Math.cos(ang) * 35;
+    const ay = player.y + player.h/2 + Math.sin(ang) * 35;
+    ctx.save();
+    ctx.translate(ax, ay);
+    ctx.rotate(ang);
+    ctx.fillStyle = '#ffe066';
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(12, 0); ctx.lineTo(-6, 6); ctx.lineTo(-6, -6);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function draw() {
+  ctx.save();
+  ctx.translate(Math.round(shakeX * Math.random()), Math.round(shakeY * Math.random()));
+
+  drawKitchenBG();
+  drawPlatforms();
+  drawClimbables();
+  drawGoal();
+  drawObstacles();
+  drawPlayer();
+  drawHUD();
+
+  ctx.restore();
+}
+
+function loop() {
+  update();
+  draw();
+  animFrame = requestAnimationFrame(loop);
+}
+
+// Initialize UI
+updateUI();
+</script>
+</body>
+</html>
