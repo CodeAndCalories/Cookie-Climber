@@ -11,7 +11,7 @@
 
 Open `index.html` in any modern browser — no install, no dependencies, no nonsense. Just cookies.
 
-**Hosted on GitHub Pages:** [your-username.github.io/cookie-climb](https://your-username.github.io/cookie-climb)
+**Hosted on GitHub Pages:** [codeandcalories.github.io/cookie-climb](https://codeandcalories.github.io/Cookie-Climber/)
 
 ---
 
